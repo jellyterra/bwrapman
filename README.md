@@ -1,0 +1,2 @@
+# bwrapman
+Bubblewrap profile launcher.
