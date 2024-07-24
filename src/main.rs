@@ -1,3 +1,6 @@
+// Copyright 2024 Jelly Terra
+// Use of this source code form is governed under the MIT license.
+
 use std::{env, fs};
 use std::collections::HashMap;
 use std::process::Command;
@@ -11,6 +14,9 @@ const fn default_false() -> bool {
 #[derive(Deserialize)]
 pub struct Config {
     pub bind: Option<Vec<(String, String)>>,
+
+    pub symlink: Option<Vec<(String, String)>>,
+
     pub env: Option<HashMap<String, String>>,
     pub unset: Option<Vec<String>>,
 
@@ -115,6 +121,15 @@ fn main() {
         Some(keys) => {
             for key in keys {
                 cmd.arg("--unsetenv").arg(key);
+            }
+        }
+    }
+
+    match profile.symlink {
+        None => {}
+        Some(symlinks) => {
+            for (src, dst) in symlinks {
+                cmd.arg("--symlink").arg(src).arg(dst);
             }
         }
     }
