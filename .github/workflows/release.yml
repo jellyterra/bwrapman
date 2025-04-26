@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.23'
+
+      - run: mkdir ~/build
+
+      - name: Build
+        shell: bash
+        run: |
+          set +e
+          go tool dist list | while IFS='/' read -ra TARGET
+          do
+          export GOOS=${TARGET[0]}
+          export GOARCH=${TARGET[1]}
+          echo "Building target $GOOS/$GOARCH"
+          go build -o ~/build/autodnsctl-${{ github.ref_name }}-$GOOS-$GOARCH ./cmd/autodnsctl
+          done
+          echo
+
+      - name: Compress via Zstd
+        run: zstd ~/build/autodnsctl-${{ github.ref_name }}-*
+
+      - name: Generate Checksums
+        run: sha256sum ~/build/*zst > ~/build/SHA256SUMS.txt
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: ${{ github.ref_name }}
+          body: AutoDNS ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run:
+          gh release -R ${{ github.repository }} upload ${{ github.ref_name }} ~/build/SHA256SUMS.txt ~/build/*zst --clobber

@@ -38,6 +38,11 @@ pub struct Config {
     pub share_cgroup: bool,
 
     #[serde(default = "default_false")]
+    pub share_wayland: bool,
+    #[serde(default = "default_false")]
+    pub share_x11: bool,
+
+    #[serde(default = "default_false")]
     pub share_env: bool,
 
     #[serde(default = "default_false")]
@@ -111,6 +116,34 @@ fn main() {
     }
     if !profile.keep_alive {
         cmd.arg("--die-with-parent");
+    }
+
+    if profile.share_wayland {
+        let xdg_runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap();
+        let wl_display = env::var("WAYLAND_DISPLAY").unwrap();
+        let wl_socket = format!("{}/{}", &xdg_runtime_dir, &wl_display);
+        cmd.arg("--ro-bind")
+            .arg(&wl_socket)
+            .arg(&wl_socket)
+            .env("WAYLAND_DISPLAY", &wl_display)
+            .env("XDG_RUNTIME_DIR", &xdg_runtime_dir);
+    }
+
+    if profile.share_x11 {
+        cmd.arg("--ro-bind")
+            .arg("/tmp/.X11-unix")
+            .arg("/tmp/.X11-unix");
+
+        let x11_auth = env::var("XAUTHORITY");
+        match x11_auth {
+            Err(_) => {}
+            Ok(x11_auth) => {
+                cmd.arg("--ro-bind")
+                    .arg(&x11_auth)
+                    .arg(&x11_auth)
+                    .env("XAUTHORITY", x11_auth);
+            }
+        }
     }
 
     match profile.procfs {
