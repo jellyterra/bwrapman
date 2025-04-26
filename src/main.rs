@@ -1,11 +1,14 @@
-// Copyright 2024 Jelly Terra
+// Copyright 2025 Jelly Terra <jellyterra@symboltics.com>
 // Use of this source code form is governed under the MIT license.
 
-use std::{env, fs};
-use std::collections::HashMap;
-use std::process::Command;
-
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::Command;
+use std::thread::sleep;
+use std::time::Duration;
+use std::{env, fs};
+use uuid::Uuid;
 
 const fn default_false() -> bool {
     false
@@ -13,7 +16,8 @@ const fn default_false() -> bool {
 
 #[derive(Deserialize)]
 pub struct Config {
-    pub bind: Option<Vec<(String, String)>>,
+    pub bind: Option<Vec<BindConfig>>,
+    pub dev_bind: Option<Vec<BindConfig>>,
 
     pub symlink: Option<Vec<(String, String)>>,
 
@@ -33,10 +37,38 @@ pub struct Config {
     #[serde(default = "default_false")]
     pub share_cgroup: bool,
 
+    #[serde(default = "default_false")]
+    pub share_env: bool,
+
+    #[serde(default = "default_false")]
+    pub keep_alive: bool,
+
+    pub procfs: Option<String>,
+    pub tmpfs: Option<Vec<String>>,
+
     pub uid: Option<u16>,
     pub gid: Option<u16>,
 
     pub hostname: Option<String>,
+
+    pub dbus_proxy: Option<DBusProxyConfig>,
+}
+
+#[derive(Deserialize)]
+pub struct BindConfig {
+    pub src: String,
+    pub dest: String,
+
+    #[serde(default = "default_false")]
+    pub no_fail: bool,
+    #[serde(default = "default_false")]
+    pub rw: bool,
+}
+
+#[derive(Deserialize)]
+pub struct DBusProxyConfig {
+    pub own: Vec<String>,
+    pub talk: Vec<String>,
 }
 
 fn main() {
@@ -51,14 +83,10 @@ fn main() {
     let executable = &args[2];
     let args = &args[3..];
 
-    let profile: Config = toml::from_str(fs::read_to_string(profile_path).unwrap().as_str()).unwrap();
+    let profile: Config =
+        toml::from_str(fs::read_to_string(profile_path).unwrap().as_str()).unwrap();
 
-    let mut cmd = Command::new("/bin/bwrap");
-
-    cmd.arg("--die-with-parent");
-    cmd.arg("--dev").arg("/dev");
-    cmd.arg("--proc").arg("/proc");
-    cmd.arg("--tmpfs").arg("/tmp");
+    let mut cmd = Command::new("bwrap");
 
     if !profile.share_ipc {
         cmd.arg("--unshare-ipc");
@@ -77,6 +105,28 @@ fn main() {
     }
     if !profile.share_uts {
         cmd.arg("--unshare-uts");
+    }
+    if !profile.share_env {
+        cmd.arg("--clearenv");
+    }
+    if !profile.keep_alive {
+        cmd.arg("--die-with-parent");
+    }
+
+    match profile.procfs {
+        None => {}
+        Some(path) => {
+            cmd.arg("--proc").arg(path);
+        }
+    }
+
+    match profile.tmpfs {
+        None => {}
+        Some(paths) => {
+            for path in paths {
+                cmd.arg("--tmpfs").arg(path);
+            }
+        }
     }
 
     match profile.uid {
@@ -109,9 +159,42 @@ fn main() {
 
     match profile.bind {
         None => {}
-        Some(bind) => {
-            for (src, dst) in bind {
-                cmd.arg("--bind").arg(src).arg(dst);
+        Some(bind_configs) => {
+            for bind in bind_configs {
+                match bind.rw {
+                    true => match bind.no_fail {
+                        true => {
+                            cmd.arg("--bind-try").arg(bind.src).arg(bind.dest);
+                        }
+                        false => {
+                            cmd.arg("--bind").arg(bind.src).arg(bind.dest);
+                        }
+                    },
+                    false => match bind.no_fail {
+                        true => {
+                            cmd.arg("--ro-bind-try").arg(bind.src).arg(bind.dest);
+                        }
+                        false => {
+                            cmd.arg("--ro-bind").arg(bind.src).arg(bind.dest);
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    match profile.dev_bind {
+        None => {}
+        Some(dev_bind_configs) => {
+            for bind in dev_bind_configs {
+                match bind.no_fail {
+                    true => {
+                        cmd.arg("--dev-bind-try").arg(bind.src).arg(bind.dest);
+                    }
+                    false => {
+                        cmd.arg("--dev-bind").arg(bind.src).arg(bind.dest);
+                    }
+                }
             }
         }
     }
@@ -134,5 +217,74 @@ fn main() {
         }
     }
 
-    cmd.arg(executable).args(args).spawn().unwrap().wait().unwrap();
+    match profile.dbus_proxy {
+        None => {
+            cmd.arg(executable)
+                .args(args)
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap();
+        }
+        Some(config) => {
+            let uuid = Uuid::new_v4();
+
+            let xdg_runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap();
+            let dbus_socket = env::var("DBUS_SESSION_BUS_ADDRESS").unwrap();
+            let dbus_proxy_socket = format!("{}/dbus-proxy-{}", xdg_runtime_dir, uuid);
+
+            let wrapper_dbus_socket = format!("{}/bus", xdg_runtime_dir);
+
+            let mut dbus_cmd = Command::new("xdg-dbus-proxy");
+            dbus_cmd
+                .arg(&dbus_socket)
+                .arg(&dbus_proxy_socket)
+                .arg("--filter");
+            for bus in config.own {
+                dbus_cmd.arg(format!("--own={}", bus));
+            }
+            for bus in config.talk {
+                dbus_cmd.arg(format!("--talk={}", bus));
+            }
+
+            let mut dbus_proc = dbus_cmd.spawn().unwrap();
+
+            loop {
+                match dbus_proc.try_wait() {
+                    Ok(None) => {
+                        if Path::new(&dbus_proxy_socket).exists() {
+                            break;
+                        }
+                        sleep(Duration::from_millis(100));
+                    }
+                    Ok(Some(status)) => {
+                        eprintln!(
+                            "dbus-proxy exited too early: exit status code {}",
+                            status.code().unwrap()
+                        );
+                        return;
+                    }
+                    Err(err) => {
+                        eprintln!("launching dbus-proxy failed: {}", err);
+                        return;
+                    }
+                }
+            }
+
+            cmd.arg("--bind")
+                .arg(&dbus_proxy_socket)
+                .arg(&wrapper_dbus_socket)
+                .env(
+                    "DBUS_SESSION_BUS_ADDRESS",
+                    format!("unix:path={}", &wrapper_dbus_socket),
+                )
+                .arg(executable)
+                .args(args)
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap();
+            dbus_proc.kill().unwrap();
+        }
+    }
 }
