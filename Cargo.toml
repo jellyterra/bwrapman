@@ -3,6 +3,15 @@ name = "bwrapman"
 version = "0.1.0"
 edition = "2021"
 
+license = "MIT"
+repository = "https://github.com/jellyterra/bwrapman"
+description = "Sandbox profile launcher for Bubblewrap."
+homepage = "https://github.com/jellyterra/bwrapman"
+documentation = "https://github.com/jellyterra/bwrapman"
+readme = "README.md"
+keywords = ["sandbox", "flatpak", "bubblewrap"]
+categories = ["command-line-utilities"]
+
 [dependencies]
 toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
