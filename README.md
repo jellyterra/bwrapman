@@ -8,6 +8,16 @@ It generates sandbox options for Bubblewrap, which Flatpak does as well.
 
 If DBus is enabled in profile, it launches a process for proxying D-Bus messages.
 
+## Install
+
+### Download [binary releases](https://github.com/jellyterra/bwrapman/releases)
+
+### Build from source
+
+```shell
+cargo install bwrapman
+```
+
 ## Usage
 
 ```
