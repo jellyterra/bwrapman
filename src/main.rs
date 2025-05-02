@@ -3,12 +3,12 @@
 
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::fs::remove_file;
 use std::path::Path;
 use std::process::Command;
 use std::thread::sleep;
 use std::time::Duration;
-use std::{env, fs};
-use uuid::Uuid;
+use std::{env, fs, process};
 
 const fn default_false() -> bool {
     false
@@ -260,11 +260,11 @@ fn main() {
                 .unwrap();
         }
         Some(config) => {
-            let uuid = Uuid::new_v4();
+            let pid = process::id();
 
             let xdg_runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap();
             let dbus_socket = env::var("DBUS_SESSION_BUS_ADDRESS").unwrap();
-            let dbus_proxy_socket = format!("{}/dbus-proxy-{}", xdg_runtime_dir, uuid);
+            let dbus_proxy_socket = format!("{}/dbus-proxy-{}", xdg_runtime_dir, pid);
 
             let wrapper_dbus_socket = format!("{}/bus", xdg_runtime_dir);
 
@@ -318,6 +318,10 @@ fn main() {
                 .wait()
                 .unwrap();
             dbus_proc.kill().unwrap();
+
+            match remove_file(&dbus_proxy_socket) {
+                _ => {}
+            }
         }
     }
 }
