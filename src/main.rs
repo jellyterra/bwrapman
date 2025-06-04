@@ -21,6 +21,7 @@ pub struct Config {
 
     pub symlink: Option<Vec<(String, String)>>,
 
+    pub env_pass: Option<Vec<String>>,
     pub env: Option<HashMap<String, String>>,
     pub unset: Option<Vec<String>>,
 
@@ -37,6 +38,8 @@ pub struct Config {
     #[serde(default = "default_false")]
     pub share_cgroup: bool,
 
+    #[serde(default = "default_false")]
+    pub share_dev: bool,
     #[serde(default = "default_false")]
     pub share_wayland: bool,
     #[serde(default = "default_false")]
@@ -118,6 +121,12 @@ fn main() {
         cmd.arg("--die-with-parent");
     }
 
+    if profile.share_dev {
+        cmd.arg("--dev-bind").arg("/dev").arg("/dev");
+    } else {
+        cmd.arg("--dev").arg("/dev");
+    }
+
     if profile.share_wayland {
         let xdg_runtime_dir = env::var("XDG_RUNTIME_DIR").unwrap();
         let wl_display = env::var("WAYLAND_DISPLAY").unwrap();
@@ -125,8 +134,12 @@ fn main() {
         cmd.arg("--ro-bind")
             .arg(&wl_socket)
             .arg(&wl_socket)
-            .env("WAYLAND_DISPLAY", &wl_display)
-            .env("XDG_RUNTIME_DIR", &xdg_runtime_dir);
+            .arg("--setenv")
+            .arg("WAYLAND_DISPLAY")
+            .arg(&wl_display)
+            .arg("--setenv")
+            .arg("XDG_RUNTIME_DIR")
+            .arg(&xdg_runtime_dir);
     }
 
     if profile.share_x11 {
@@ -141,9 +154,13 @@ fn main() {
                 cmd.arg("--ro-bind")
                     .arg(&x11_auth)
                     .arg(&x11_auth)
-                    .env("XAUTHORITY", x11_auth);
+                    .arg("--setenv")
+                    .arg("XAUTHORITY")
+                    .arg(x11_auth);
             }
         }
+    } else {
+        cmd.arg("--unsetenv").arg("XAUTHORITY");
     }
 
     match profile.procfs {
@@ -185,8 +202,24 @@ fn main() {
 
     match profile.env {
         None => {}
-        Some(map) => {
-            cmd.envs(map);
+        Some(vars) => {
+            for (k, v) in vars {
+                cmd.arg("--setenv").arg(k).arg(v);
+            }
+        }
+    }
+
+    match profile.env_pass {
+        None => {}
+        Some(env_pass) => {
+            for k in env_pass {
+                match env::var(&k) {
+                    Ok(v) => {
+                        cmd.arg("--setenv").arg(k).arg(v);
+                    }
+                    Err(_) => {}
+                }
+            }
         }
     }
 
@@ -307,10 +340,9 @@ fn main() {
             cmd.arg("--bind")
                 .arg(&dbus_proxy_socket)
                 .arg(&wrapper_dbus_socket)
-                .env(
-                    "DBUS_SESSION_BUS_ADDRESS",
-                    format!("unix:path={}", &wrapper_dbus_socket),
-                )
+                .arg("--setenv")
+                .arg("DBUS_SESSION_BUS_ADDRESS")
+                .arg(format!("unix:path={}", &wrapper_dbus_socket))
                 .arg(executable)
                 .args(args)
                 .spawn()

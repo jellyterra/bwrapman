@@ -45,6 +45,7 @@ pub struct Config {
     pub share_net: bool,
     pub share_uts: bool,
     pub share_cgroup: bool,
+    pub share_dev: bool,
     pub share_wayland: bool,
     pub share_x11: bool,
     pub share_env: bool,
@@ -54,6 +55,7 @@ pub struct Config {
     pub dev_bind: Option<Vec<BindConfig>>,
     pub symlink: Option<Vec<(String, String)>>,
 
+    pub env_pass: Option<Vec<String>>,
     pub env: Option<HashMap<String, String>>,
     pub unset: Option<Vec<String>>,
 
@@ -64,6 +66,7 @@ pub struct Config {
     pub gid: Option<u16>,
 
     pub hostname: Option<String>,
+
     pub dbus_proxy: Option<DBusProxyConfig>,
 }
 
